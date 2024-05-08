@@ -1,7 +1,7 @@
 module bench();
     reg CLK;
     wire RESET = 0;
-    wire [4:0] LEDS;
+    wire [31:0] LEDS;
     reg  RXD = 1'b0;
     wire TXD;
 

@@ -19,20 +19,15 @@ module SOC (
     reg [31:0] instr;
 
     `include "riscv_assembly.v"
+    integer L0_ = 8;
     initial begin
-        ADD(x0,x0,x0);
         ADD(x1,x0,x0);
+        ADDI(x2,x0,5);
+    Label(L0_);
         ADDI(x1,x1,1);
-        ADDI(x1,x1,1);
-        ADDI(x1,x1,1);
-        ADDI(x1,x1,1);
-        ADD(x2,x1,x0);
-        ADD(x3,x1,x2);
-        SRLI(x3,x3,3);
-        SLLI(x3,x3,31);
-        SRAI(x3,x3,5);
-        SRLI(x1,x3,26);
+        BNE(x1,x2,LabelRef(L0_));
         EBREAK();
+        endASM();
     end
 
     // https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMAFDQC/riscv-spec-20191213.pdf
@@ -98,13 +93,32 @@ module SOC (
         endcase
     end
 
+    reg takeBranch;
+    always @(*) begin
+        case (funct3)
+            3'b000: takeBranch = (rs1val == rs2val);
+            3'b001: takeBranch = (rs1val != rs2val);
+            3'b100: takeBranch = ($signed(rs1val) < $signed(rs2val));
+            3'b101: takeBranch = ($signed(rs1val) == $signed(rs2val));
+            3'b110: takeBranch = (rs1val < rs2val);
+            3'b111: takeBranch = (rs1val >= rs2val);
+            default: takeBranch = 1'b0;
+        endcase
+    end
+
     localparam IF = 0;
     localparam ID = 1;
     localparam EX = 2;
     reg [1:0] state = IF;
 
     assign writeBackData = aluOut;
-    assign writeBackEn = (state == EX && (isALUreg || isALUimm));
+    wire isWriteBack = isALUreg || isALUimm || isJAL || isJALR;
+    assign writeBackEn = (state == EX && isWriteBack);
+
+    wire [31:0] nextPC = (isBranch && takeBranch) ? PC+Bimm :
+                         isJAL ? PC+Jimm :
+                         isJALR ? rs1val+Iimm :
+                         PC+4;
 
     always @(posedge clk) begin
         if (!resetn) begin
@@ -133,7 +147,7 @@ module SOC (
                 end
 
                 EX: begin
-                    PC <= PC + 4;
+                    PC <= nextPC;
                     state <= IF;
 `ifdef BENCH
                     if (isSYSTEM) $finish();
