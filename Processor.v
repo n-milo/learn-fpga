@@ -140,7 +140,7 @@ module Processor (
                     x1 <= writeBackData;
                 end
 `ifdef BENCH
-                $display("x%0d <= %b", rd, writeBackData);
+                // $display("x%0d <= %b", rd, writeBackData);
 `endif
             end
             case (state)
@@ -174,21 +174,21 @@ module Processor (
     assign mem_rstrb = (state == IF);
 
 `ifdef BENCH
-    always @(posedge clk) begin
-        $display("PC=%0d",PC);
-        case (1'b1)
-            isALUreg: $display("ALUreg rd=%d rs1=%d rs2=%d funct3=%b",rd, rs1, rs2, funct3);
-            isALUimm: $display("ALUimm rd=%d rs1=%d imm=%0d funct3=%b",rd, rs1, Iimm, funct3);
-            isBranch: $display("BRANCH");
-            isJAL:    $display("JAL");
-            isJALR:   $display("JALR");
-            isAUIPC:  $display("AUIPC");
-            isLUI:    $display("LUI");
-            isLoad:   $display("LOAD");
-            isStore:  $display("STORE");
-            isSYSTEM: $display("SYSTEM");
-        endcase
-    end
+//    always @(posedge clk) begin
+//        $display("PC=%0d",PC);
+//        case (1'b1)
+//            isALUreg: $display("ALUreg rd=%d rs1=%d rs2=%d funct3=%b",rd, rs1, rs2, funct3);
+//            isALUimm: $display("ALUimm rd=%d rs1=%d imm=%0d funct3=%b",rd, rs1, Iimm, funct3);
+//            isBranch: $display("BRANCH");
+//            isJAL:    $display("JAL");
+//            isJALR:   $display("JALR");
+//            isAUIPC:  $display("AUIPC");
+//            isLUI:    $display("LUI");
+//            isLoad:   $display("LOAD");
+//            isStore:  $display("STORE");
+//            isSYSTEM: $display("SYSTEM");
+//        endcase
+//    end
 `endif
 
 endmodule
