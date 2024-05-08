@@ -11,13 +11,24 @@ module SOC (
     wire clk;
     wire resetn;
 
-    reg [4:0] count = 0;
+    reg [4:0] MEM [0:20];
+    initial begin
+        MEM[0]  = 5'b00001;
+        MEM[1]  = 5'b00010;
+        MEM[2]  = 5'b00100;
+        MEM[3]  = 5'b01000;
+        MEM[4]  = 5'b10000;
+    end
+
+    reg [4:0] PC = 0;
+    reg [4:0] leds = 0;
     always @(posedge clk) begin
-        count <= count + 1;
+        leds <= MEM[PC];
+        PC <= (!resetn || PC==4) ? 0 : (PC+1);
     end
 
     Clockworks #(
-        .SLOW(19)
+        .SLOW(18)
     )CW(
         .CLK(CLK),
         .RESET(RESET),
@@ -25,7 +36,7 @@ module SOC (
         .resetn(resetn)
     );
 
-    assign LEDS = count;
+    assign LEDS = leds;
     assign TXD = 1'b0;
 
 endmodule
