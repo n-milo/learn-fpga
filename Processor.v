@@ -1,34 +1,14 @@
-`include "clockworks.v"
-
-module SOC (
-    input  CLK,
-    input  RESET,
-    output [31:0] LEDS,
-    input  RXD,
-    output TXD
+module Processor (
+    input clk,
+    input resetn,
+    output [31:0] mem_addr,
+    input  [31:0] mem_rdata,
+    output        mem_rstrb,
+    output reg [31:0] x1
 );
 
-    wire clk;
-    wire resetn;
-
-    reg [31:0] leds = 0;
-    assign LEDS = leds;
-
-    reg [31:0] MEM [0:255];
     reg [31:0] PC = 0;
     reg [31:0] instr;
-
-    `include "riscv_assembly.v"
-    integer L0_ = 8;
-    initial begin
-        ADD(x1,x0,x0);
-        ADDI(x2,x0,5);
-    Label(L0_);
-        ADDI(x1,x1,1);
-        BNE(x1,x2,LabelRef(L0_));
-        EBREAK();
-        endASM();
-    end
 
     // https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMAFDQC/riscv-spec-20191213.pdf
     // pg 130
@@ -107,8 +87,9 @@ module SOC (
     end
 
     localparam IF = 0;
-    localparam ID = 1;
-    localparam EX = 2;
+    localparam WAIT_IF = 1;
+    localparam ID = 2;
+    localparam EX = 3;
     reg [1:0] state = IF;
 
     assign writeBackData = (isJAL || isJALR) ? (PC+4) :
@@ -132,7 +113,7 @@ module SOC (
             if (writeBackEn && rd != 0) begin
                 RegisterBank[rd] <= writeBackData;
                 if (rd == 1) begin
-                    leds <= writeBackData;
+                    x1 <= writeBackData;
                 end
 `ifdef BENCH
                 $display("x%0d <= %b", rd, writeBackData);
@@ -140,7 +121,11 @@ module SOC (
             end
             case (state)
                 IF: begin
-                    instr <= MEM[PC[31:2]];
+                    state <= WAIT_IF;
+                end
+
+                WAIT_IF: begin
+                    instr <= mem_rdata;
                     state <= ID;
                 end
 
@@ -161,6 +146,9 @@ module SOC (
         end
     end
 
+    assign mem_addr = PC;
+    assign mem_rstrb = (state == IF);
+
 `ifdef BENCH
     always @(posedge clk) begin
         $display("PC=%0d",PC);
@@ -178,16 +166,5 @@ module SOC (
         endcase
     end
 `endif
-
-    Clockworks #(
-        .SLOW(18)
-    )CW(
-        .CLK(CLK),
-        .RESET(RESET),
-        .clk(clk),
-        .resetn(resetn)
-    );
-
-    assign TXD = 1'b0;
 
 endmodule

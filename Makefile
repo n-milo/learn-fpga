@@ -1,5 +1,5 @@
 
-all: cpu.v
+all: SOC.v
 	iverilog -DBENCH -DBOARD_FREQ=10 bench_iverilog.v $^
 
 run: all
