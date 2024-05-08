@@ -14,21 +14,21 @@ module Memory (
     integer L1_ = 28;
 
     initial begin
-        ADD(x10,x0,x0);
+        LI(a0, 0);
     Label(L0_);
-        ADDI(x10,x10,1);
-        JAL(x1,LabelRef(wait_));
-        JAL(zero,LabelRef(L0_));
+        ADDI(a0, a0, 1);
+        CALL(LabelRef(wait_));
+        J(LabelRef(L0_));
 
         EBREAK();
 
     Label(wait_);
-        ADDI(x11,x0,1);
-        SLLI(x11,x11,slow_bit);
+        LI(a1, 1);
+        SLLI(a1, a1, slow_bit);
     Label(L1_);
-        ADDI(x11,x11,-1);
-        BNE(x11,x0,LabelRef(L1_));
-        JALR(x0,x1,0);
+        ADDI(a1, a1, -1);
+        BNEZ(a1, LabelRef(L1_));
+        RET();
 
         endASM();
     end
