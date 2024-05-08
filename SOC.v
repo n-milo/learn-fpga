@@ -34,9 +34,7 @@ module SOC (
 
     assign LEDS = x1[4:0];
 
-    Clockworks #(
-        .SLOW(18)
-    )CW(
+    Clockworks CW(
         .CLK(CLK),
         .RESET(RESET),
         .clk(clk),
