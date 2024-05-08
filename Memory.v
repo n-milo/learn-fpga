@@ -10,8 +10,8 @@ module Memory (
 
     `include "riscv_assembly.v"
     integer L0_ = 4;
-    integer wait_ = 20;
-    integer L1_ = 28;
+    integer wait_ = 24;
+    integer L1_ = 32;
 
     initial begin
         LI(a0, 0);
