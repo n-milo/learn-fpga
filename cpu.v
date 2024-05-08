@@ -45,16 +45,37 @@ module SOC (
 
     end
 
+    reg [31:0] RegisterBank [0:31];
+    reg [31:0] rs1val;
+    reg [31:0] rs2val;
+
     reg [31:0] instr;
     reg [4:0] PC = 0;
     reg [4:0] leds = 0;
+
+    localparam IF = 0;
+    localparam ID = 1;
+    localparam EX = 2;
+    reg [1:0] state = IF;
+
     always @(posedge clk) begin
-        if (!resetn) begin
-            PC <= 0;
-        end else if (!isSYSTEM) begin
-            instr <= MEM[PC];
-            PC <= PC+1;
-        end
+        case (state)
+            IF: begin
+                instr <= MEM[PC];
+                state <= ID;
+            end
+
+            ID: begin
+                rs1val <= RegisterBank[rs1];
+                rs2val <= RegisterBank[rs2];
+                state <= EX;
+            end
+
+            EX: begin
+                PC <= PC + 1;
+                state <= IF;
+            end
+        endcase
     end
 
     // https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMAFDQC/riscv-spec-20191213.pdf
@@ -88,6 +109,32 @@ module SOC (
     wire [31:0] Jimm= {{12{instr[31]}}, instr[19:12], instr[20], instr[30:21], 1'b0};
 
     assign LEDS = isSYSTEM ? 31 : {PC[0],isALUreg,isALUimm,isStore,isLoad};
+
+    wire [31:0] aluIn1 = rs1val;
+    wire [31:0] aluIn2 = isALUreg ? rs2val : Iimm;
+    reg [31:0] aluOut;
+    wire [4:0] shiftAmt = isALUreg ? rs2val[4:0] : instr[24:20];
+
+    always @(*) begin
+        case (funct3)
+            3'b000: aluOut = (funct7[5] & instr[5]) ? (aluIn1 - aluIn2) : (aluIn1 + aluIn2);
+            3'b001: aluOut = aluIn1 << shiftAmt;
+            3'b010: aluOut = ($signed(aluIn1) < $signed(aluIn2));
+            3'b011: aluOut = (aluIn1 < aluIn2);
+            3'b100: aluOut = (aluIn1 ^ aluIn2);
+            3'b101: aluOut = funct7[5] ? ($signed(aluIn1) >>> shiftAmt) : (aluIn1 >> shiftAmt);
+            3'b110: aluOut = (aluIn1 | aluIn2);
+            3'b111: aluOut = (aluIn1 & aluIn2);
+        endcase
+    end
+
+    wire [31:0] writeBackData = aluOut;
+    wire writeBackEn = (state == EX && (isALUreg || isALUimm));
+    always @(posedge clk) begin
+        if (writeBackEn && rd != 0) begin
+            RegisterBank[rd] <= writeBackData;
+        end
+    end
 
 `ifdef BENCH
     always @(posedge clk) begin
