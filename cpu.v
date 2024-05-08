@@ -3,7 +3,7 @@
 module SOC (
     input  CLK,
     input  RESET,
-    output [4:0] LEDS,
+    output [31:0] LEDS,
     input  RXD,
     output TXD
 );
@@ -11,71 +11,28 @@ module SOC (
     wire clk;
     wire resetn;
 
-    reg [31:0] MEM [0:7];
-    initial begin
-        PC = 0;
+    reg [31:0] leds = 0;
+    assign LEDS = leds;
 
-        // add x0, x0, x0
-        //                   rs2   rs1  add  rd   ALUREG
-        instr = 32'b0000000_00000_00000_000_00000_0110011;
-        // add x1, x0, x0
-        //                    rs2   rs1  add  rd  ALUREG
-        MEM[0] = 32'b0000000_00000_00000_000_00001_0110011;
-        // addi x1, x1, 1
-        //             imm         rs1  add  rd   ALUIMM
-        MEM[1] = 32'b000000000001_00001_000_00001_0010011;
-        // addi x1, x1, 1
-        //             imm         rs1  add  rd   ALUIMM
-        MEM[2] = 32'b000000000001_00001_000_00001_0010011;
-        // addi x1, x1, 1
-        //             imm         rs1  add  rd   ALUIMM
-        MEM[3] = 32'b000000000001_00001_000_00001_0010011;
-        // addi x1, x1, 1
-        //             imm         rs1  add  rd   ALUIMM
-        MEM[4] = 32'b000000000001_00001_000_00001_0010011;
-        // lw x2,0(x1)
-        //             imm         rs1   w   rd   LOAD
-        MEM[5] = 32'b000000000000_00001_010_00010_0000011;
-        // sw x2,0(x1)
-        //             imm   rs2   rs1   w   imm  STORE
-        MEM[6] = 32'b000000_00010_00001_010_00000_0100011;
-        // ebreak
-        //                                        SYSTEM
-        MEM[7] = 32'b000000000001_00000_000_00000_1110011;
-
-    end
-
-    reg [31:0] RegisterBank [0:31];
-    reg [31:0] rs1val;
-    reg [31:0] rs2val;
-
+    reg [31:0] MEM [0:255];
+    reg [31:0] PC = 0;
     reg [31:0] instr;
-    reg [4:0] PC = 0;
-    reg [4:0] leds = 0;
 
-    localparam IF = 0;
-    localparam ID = 1;
-    localparam EX = 2;
-    reg [1:0] state = IF;
-
-    always @(posedge clk) begin
-        case (state)
-            IF: begin
-                instr <= MEM[PC];
-                state <= ID;
-            end
-
-            ID: begin
-                rs1val <= RegisterBank[rs1];
-                rs2val <= RegisterBank[rs2];
-                state <= EX;
-            end
-
-            EX: begin
-                PC <= PC + 1;
-                state <= IF;
-            end
-        endcase
+    `include "riscv_assembly.v"
+    initial begin
+        ADD(x0,x0,x0);
+        ADD(x1,x0,x0);
+        ADDI(x1,x1,1);
+        ADDI(x1,x1,1);
+        ADDI(x1,x1,1);
+        ADDI(x1,x1,1);
+        ADD(x2,x1,x0);
+        ADD(x3,x1,x2);
+        SRLI(x3,x3,3);
+        SLLI(x3,x3,31);
+        SRAI(x3,x3,5);
+        SRLI(x1,x3,26);
+        EBREAK();
     end
 
     // https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMAFDQC/riscv-spec-20191213.pdf
@@ -108,7 +65,20 @@ module SOC (
     wire [31:0] Bimm= {{20{instr[31]}}, instr[7], instr[30:25], instr[11:8], 1'b0};
     wire [31:0] Jimm= {{12{instr[31]}}, instr[19:12], instr[20], instr[30:21], 1'b0};
 
-    assign LEDS = isSYSTEM ? 31 : {PC[0],isALUreg,isALUimm,isStore,isLoad};
+    reg [31:0] RegisterBank [0:31];
+    reg [31:0] rs1val;
+    reg [31:0] rs2val;
+    wire [31:0] writeBackData;
+    wire writeBackEn;
+
+`ifdef BENCH
+    integer     i;
+    initial begin
+        for(i=0; i<32; ++i) begin
+            RegisterBank[i] = 0;
+        end
+    end
+`endif
 
     wire [31:0] aluIn1 = rs1val;
     wire [31:0] aluIn2 = isALUreg ? rs2val : Iimm;
@@ -128,11 +98,48 @@ module SOC (
         endcase
     end
 
-    wire [31:0] writeBackData = aluOut;
-    wire writeBackEn = (state == EX && (isALUreg || isALUimm));
+    localparam IF = 0;
+    localparam ID = 1;
+    localparam EX = 2;
+    reg [1:0] state = IF;
+
+    assign writeBackData = aluOut;
+    assign writeBackEn = (state == EX && (isALUreg || isALUimm));
+
     always @(posedge clk) begin
-        if (writeBackEn && rd != 0) begin
-            RegisterBank[rd] <= writeBackData;
+        if (!resetn) begin
+            PC <= 0;
+            state <= IF;
+        end else begin
+            if (writeBackEn && rd != 0) begin
+                RegisterBank[rd] <= writeBackData;
+                if (rd == 1) begin
+                    leds <= writeBackData;
+                end
+`ifdef BENCH
+                $display("x%0d <= %b", rd, writeBackData);
+`endif
+            end
+            case (state)
+                IF: begin
+                    instr <= MEM[PC[31:2]];
+                    state <= ID;
+                end
+
+                ID: begin
+                    rs1val <= RegisterBank[rs1];
+                    rs2val <= RegisterBank[rs2];
+                    state <= EX;
+                end
+
+                EX: begin
+                    PC <= PC + 4;
+                    state <= IF;
+`ifdef BENCH
+                    if (isSYSTEM) $finish();
+`endif
+                end
+            endcase
         end
     end
 
