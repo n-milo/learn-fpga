@@ -111,8 +111,12 @@ module SOC (
     localparam EX = 2;
     reg [1:0] state = IF;
 
-    assign writeBackData = aluOut;
-    wire isWriteBack = isALUreg || isALUimm || isJAL || isJALR;
+    assign writeBackData = (isJAL || isJALR) ? (PC+4) :
+                           isLUI ? Uimm :
+                           isAUIPC ? (PC + Uimm) :
+                           aluOut;
+
+    wire isWriteBack = isALUreg || isALUimm || isJAL || isJALR || isLUI || isAUIPC;
     assign writeBackEn = (state == EX && isWriteBack);
 
     wire [31:0] nextPC = (isBranch && takeBranch) ? PC+Bimm :
