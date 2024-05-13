@@ -7,22 +7,37 @@ module Memory (
     input      [3:0]  mem_wmask
 );
 
+    localparam IO_LEDS_bit = 0;
+    localparam IO_UART_DATA_bit = 1;
+    localparam IO_UART_CTRL_bit = 2;
+
+    function [31:0] IO_BIT_TO_OFFSET;
+        input [31:0] bit;
+        begin
+            IO_BIT_TO_OFFSET = 1 << (bit + 2);
+        end
+    endfunction
+
     localparam slow_bit = 13;
     reg [31:0] MEM [0:1535];
 
     `include "riscv_assembly.v"
-    integer L1_   = 8;
-    integer wait_ = 28;
-    integer L2_   = 36;
+    integer L1_   = 12;
+    integer wait_ = 40;
+    integer L2_   = 48;
+    integer putc_ = 60;
+    integer putc_loop_ = 68;
 
     initial begin
 
         LI(gp,32'h400000);
-        LI(a0,0);
+        LI(a0,65);
+        LI(a1,0);
     Label(L1_);
-        SW(a0,gp,4);
+        SW(a1,gp,IO_BIT_TO_OFFSET(IO_LEDS_bit));
         CALL(LabelRef(wait_));
-        ADDI(a0,a0,1);
+        ADDI(a1,a1,1);
+        CALL(LabelRef(putc_));
         J(LabelRef(L1_));
 
     Label(wait_);
@@ -31,6 +46,15 @@ module Memory (
     Label(L2_);
         ADDI(t0,t0,-1);
         BNEZ(t0,LabelRef(L2_));
+        RET();
+
+    Label(putc_);
+        SW(a0, gp, IO_BIT_TO_OFFSET(IO_UART_DATA_bit));
+        LI(t0, 1<<9);
+    Label(putc_loop_);
+        LW(t1, gp, IO_BIT_TO_OFFSET(IO_UART_DATA_bit));
+        AND(t1, t1, t0);
+        BNEZ(t1, LabelRef(putc_loop_));
         RET();
 
         endASM();

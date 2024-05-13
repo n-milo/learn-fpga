@@ -1,6 +1,7 @@
 `include "clockworks.v"
 `include "Memory.v"
 `include "Processor.v"
+`include "emitter_uart.v"
 
 module SOC (
     input            CLK,
@@ -48,13 +49,42 @@ module SOC (
     );
 
     localparam IO_LEDS_bit = 0;
+    localparam IO_UART_DATA_bit = 1;
+    localparam IO_UART_CTRL_bit = 2;
+
     always @(posedge clk) begin
         if (isIO & mem_wstrb & mem_wordaddr[IO_LEDS_bit]) begin
             LEDS <= mem_wdata;
         end
     end
 
-    assign mem_rdata = isRAM ? RAM_rdata : 0;
+    wire uart_valid = isIO & mem_wstrb & mem_wordaddr[IO_UART_DATA_bit];
+    wire uart_ready;
+
+    corescore_emitter_uart #(
+        .clk_freq_hz(`BOARD_FREQ*1000000),
+        .baud_rate(115200)
+    ) UART(
+        .i_clk(clk),
+        .i_rst(!resetn),
+        .i_data(mem_wdata[7:0]),
+        .i_valid(uart_valid),
+        .o_ready(uart_ready),
+        .o_uart_tx(TXD)
+    );
+
+    wire [31:0] IO_rdata = mem_wordaddr[IO_UART_CTRL_bit] ? {22'b0, !uart_ready, 9'b0} : 32'b0;
+
+    assign mem_rdata = isRAM ? RAM_rdata : IO_rdata;
+
+`ifdef BENCH
+    always @(posedge clk) begin
+        if (uart_valid) begin
+            $write("%c", mem_wdata[7:0]);
+            $fflush(32'h8000_0001);
+        end
+    end
+`endif
 
     Clockworks CW(
         .CLK(CLK),
