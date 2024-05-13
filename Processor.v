@@ -4,7 +4,9 @@ module Processor (
     output [31:0] mem_addr,
     input  [31:0] mem_rdata,
     output        mem_rstrb,
-    output reg [31:0] x1
+    output [31:0] mem_wdata,
+    output [3:0]  mem_wmask,
+    output reg [31:0] x10 = 0
 );
 
     reg [31:0] PC = 0;
@@ -56,9 +58,34 @@ module Processor (
     end
 `endif
 
+    wire [31:0] loadstore_addr = rs1val + (isStore ? Simm : Iimm);
+    wire [15:0] LOAD_halfword = loadstore_addr[1] ? mem_rdata[31:16] : mem_rdata[15:0];
+    wire [7:0] LOAD_byte = loadstore_addr[0] ? LOAD_halfword[15:8] : LOAD_halfword[7:0];
+    wire mem_byteAccess = funct3[1:0] == 2'b00;
+    wire mem_halfwordAccess = funct3[1:0] == 2'b01;
+
+    wire LOAD_sign = !funct3[2] & (mem_byteAccess ? LOAD_byte[7] : LOAD_halfword[15]);
+
+    wire [31:0] LOAD_data = mem_byteAccess ? {{24{LOAD_sign}}, LOAD_byte} :
+                            mem_halfwordAccess ? {{16{LOAD_sign}}, LOAD_halfword} :
+                            mem_rdata;
+
+    wire [3:0] STORE_mask = mem_byteAccess ?
+                                (loadstore_addr[1] ?
+                                    (loadstore_addr[0] ? 4'b1000 : 4'b0100) :
+                                    (loadstore_addr[0] ? 4'b0010 : 4'b0001)
+                                ) :
+                            mem_halfwordAccess ?
+                                (loadstore_addr[1] ? 4'b1100 : 4'b0011) : 4'b1111;
+
+    assign mem_wdata[ 7:0 ] = rs2val[7:0];
+    assign mem_wdata[15:8 ] = loadstore_addr[0] ? rs2val[7:0]  : rs2val[15:8];
+    assign mem_wdata[23:16] = loadstore_addr[0] ? rs2val[7:0]  : rs2val[23:16];
+    assign mem_wdata[31:24] = loadstore_addr[0] ? rs2val[7:0]  :
+                              loadstore_addr[1] ? rs2val[15:8] : rs2val[31:24];
+
     wire [31:0] aluIn1 = rs1val;
     wire [31:0] aluIn2 = isALUreg | isBranch ? rs2val : Iimm;
-    reg [31:0] aluOut;
     wire [4:0] shiftAmt = isALUreg ? rs2val[4:0] : instr[24:20];
 
     // optimization: we can do the subtraction in 33 bits
@@ -82,6 +109,7 @@ module Processor (
     wire [31:0] shifter = $signed({instr[30] & aluIn1[31], shifter_in}) >>> aluIn2[4:0];
     wire [31:0] leftshift = flip32(shifter);
 
+    reg [31:0] aluOut;
     always @(*) begin
         case (funct3)
             3'b000: aluOut = (funct7[5] & instr[5]) ? aluMinus[31:0] : aluPlus;
@@ -112,7 +140,10 @@ module Processor (
     localparam WAIT_IF = 1;
     localparam ID = 2;
     localparam EX = 3;
-    reg [1:0] state = IF;
+    localparam LOAD = 4;
+    localparam WAIT_DATA = 5;
+    localparam STORE = 6;
+    reg [2:0] state = IF;
 
     wire [31:0] PCplusImm = PC + (isJAL ? Jimm : isAUIPC ? Uimm : Bimm);
     wire [31:0] PCplus4 = PC + 4;
@@ -122,8 +153,7 @@ module Processor (
                            isAUIPC ? PCplusImm :
                            aluOut;
 
-    wire isWriteBack = isALUreg || isALUimm || isJAL || isJALR || isLUI || isAUIPC;
-    assign writeBackEn = (state == EX && isWriteBack);
+    assign writeBackEn = (state == EX && !isBranch && !isStore && !isLoad) || (state == WAIT_DATA);
 
     wire [31:0] nextPC = ((isBranch && takeBranch) || isJAL) ? PCplusImm :
                          isJALR ? {aluPlus[31:1], 1'b0} :
@@ -136,11 +166,11 @@ module Processor (
         end else begin
             if (writeBackEn && rd != 0) begin
                 RegisterBank[rd] <= writeBackData;
-                if (rd == 1) begin
-                    x1 <= writeBackData;
+                if (rd == 10) begin
+                    x10 <= writeBackData;
                 end
-`ifdef BENCH
-                // $display("x%0d <= %b", rd, writeBackData);
+`ifdef VERBOSE
+                $display("x%0d <= %b", rd, writeBackData);
 `endif
             end
             case (state)
@@ -161,34 +191,48 @@ module Processor (
 
                 EX: begin
                     PC <= nextPC;
-                    state <= IF;
+                    state <= isLoad ? LOAD : (isStore ? STORE : IF);
 `ifdef BENCH
                     if (isSYSTEM) $finish();
 `endif
+                end
+
+                LOAD: begin
+                    state <= WAIT_DATA;
+                end
+
+                WAIT_DATA: begin
+                    state <= IF;
+                end
+
+                STORE: begin
+                    state <= IF;
                 end
             endcase
         end
     end
 
-    assign mem_addr = PC;
-    assign mem_rstrb = (state == IF);
+    assign mem_addr = (state == WAIT_IF || state == IF) ? PC : loadstore_addr;
+    assign mem_rstrb = (state == IF || state == LOAD);
 
-`ifdef BENCH
-//    always @(posedge clk) begin
-//        $display("PC=%0d",PC);
-//        case (1'b1)
-//            isALUreg: $display("ALUreg rd=%d rs1=%d rs2=%d funct3=%b",rd, rs1, rs2, funct3);
-//            isALUimm: $display("ALUimm rd=%d rs1=%d imm=%0d funct3=%b",rd, rs1, Iimm, funct3);
-//            isBranch: $display("BRANCH");
-//            isJAL:    $display("JAL");
-//            isJALR:   $display("JALR");
-//            isAUIPC:  $display("AUIPC");
-//            isLUI:    $display("LUI");
-//            isLoad:   $display("LOAD");
-//            isStore:  $display("STORE");
-//            isSYSTEM: $display("SYSTEM");
-//        endcase
-//    end
+    assign mem_wmask = {4{(state == STORE)}} & STORE_mask;
+
+`ifdef VERBOSE
+    always @(posedge clk) begin
+        $display("PC=%0d",PC);
+        case (1'b1)
+            isALUreg: $display("ALUreg rd=%d rs1=%d rs2=%d funct3=%b",rd, rs1, rs2, funct3);
+            isALUimm: $display("ALUimm rd=%d rs1=%d imm=%0d funct3=%b",rd, rs1, Iimm, funct3);
+            isBranch: $display("BRANCH");
+            isJAL:    $display("JAL");
+            isJALR:   $display("JALR");
+            isAUIPC:  $display("AUIPC");
+            isLUI:    $display("LUI");
+            isLoad:   $display("LOAD");
+            isStore:  $display("STORE");
+            isSYSTEM: $display("SYSTEM");
+        endcase
+    end
 `endif
 
 endmodule
